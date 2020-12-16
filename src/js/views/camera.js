@@ -195,9 +195,6 @@ cca.views.Camera.prototype.focus = function() {
  * @private
  */
 cca.views.Camera.prototype.onShutterButtonClicked_ = function(event) {
-  if (!this.capturing) {
-    return;
-  }
   if (this.taking) {
     // End the prior ongoing take if any; a new take shouldn't be started
     // until the prior one is ended.
@@ -219,7 +216,21 @@ cca.views.Camera.prototype.onShutterButtonClicked_ = function(event) {
 };
 
 /**
- * Updates the shutter button's label for taking/record-mode state changes.
+ * Updates UI controls for capturing/taking state changes.
+ * @private
+ */
+cca.views.Camera.prototype.updateControls_ = function() {
+  // Update the shutter's label before enabling or disabling it.
+  var [capturing, taking] = [this.capturing, this.taking];
+  this.updateShutterLabel_();
+  // TODO(yuli): Use no-op instead of disabling buttions.
+  this.shutterButton_.disabled = !capturing;
+  this.options_.updateControls(capturing, taking);
+  this.galleryButton_.disabled = !capturing || taking;
+};
+
+/**
+ * Updates the shutter button's label.
  * @private
  */
 cca.views.Camera.prototype.updateShutterLabel_ = function() {
@@ -258,7 +269,7 @@ cca.views.Camera.prototype.handlingKey = function(key) {
 cca.views.Camera.prototype.beginTake_ = function() {
   document.body.classList.add('taking');
   this.ticks_ = this.options_.timerTicks();
-  this.updateShutterLabel_();
+  this.updateControls_();
 
   Promise.resolve(this.ticks_).then(() => {
     // Play a sound before starting to record and delay the take to avoid the
@@ -269,13 +280,11 @@ cca.views.Camera.prototype.beginTake_ = function() {
       if (this.recordMode) {
         // Take of recording will be ended by another shutter click.
         this.take_ = this.createRecordingBlob_().catch((error) => {
-          cca.toast.show('errorMsgEmptyRecording');
-          throw error;
+          throw [error, 'errorMsgEmptyRecording'];
         });
       } else {
         this.take_ = this.createPhotoBlob_().catch((error) => {
-          cca.toast.show('errorMsgTakePhotoFailed');
-          throw error;
+          throw [error, 'errorMsgTakePhotoFailed'];
         });
         this.endTake_();
       }
@@ -310,15 +319,17 @@ cca.views.Camera.prototype.endTake_ = function() {
           cca.views.camera.Options.Sound.RECORDEND :
           cca.views.camera.Options.Sound.SHUTTER);
       return this.model_.savePicture(blob, recordMode).catch((error) => {
-        cca.toast.show('errorMsgSaveFileFailed');
-        throw error;
+        throw [error, 'errorMsgSaveFileFailed'];
       });
     }
-  }).catch(console.error).finally(() => {
+  }).catch(([error, message]) => {
+    console.error(error);
+    cca.toast.show(message);
+  }).finally(() => {
     // Re-enable UI controls after finishing the take.
     this.take_ = null;
     document.body.classList.remove('taking');
-    this.updateShutterLabel_();
+    this.updateControls_();
   });
 };
 
@@ -347,23 +358,17 @@ cca.views.Camera.prototype.createRecordingBlob_ = function() {
       if (recordedBlob.size) {
         resolve(recordedBlob);
       } else {
-        reject(new Error('Recording blob error.'));
+        reject('Recording blob error.');
       }
     };
     this.mediaRecorder_.addEventListener('dataavailable', ondataavailable);
     this.mediaRecorder_.addEventListener('stop', onstop);
 
-    // Start recording and update the UI for the ongoing recording.
-    // TODO(yuli): Don't re-enable audio after crbug.com/878255 fixed in M73.
-    var track = this.preview_.stream.getAudioTracks()[0];
-    var enableAudio = (enabled) => {
-      if (track) {
-        track.enabled = enabled;
-      }
-    };
-    enableAudio(true);
+    // Start recording and update the UI for the ongoing recording. Force to
+    // re-enable audio track before starting recording (crbug.com/878255).
+    this.options_.updateMicAudio(true);
     this.mediaRecorder_.start();
-    enableAudio(document.body.classList.contains('mic'));
+    this.options_.updateMicAudio();
     this.recordTime_.start();
   });
 };
@@ -404,7 +409,7 @@ cca.views.Camera.prototype.createPhotoBlob_ = function() {
 cca.views.Camera.prototype.prepareMediaRecorder_ = function() {
   if (this.mediaRecorder_ == null) {
     if (!MediaRecorder.isTypeSupported(cca.views.Camera.RECORD_MIMETYPE)) {
-      throw new Error('The preferred mimeType is not supported.');
+      throw 'The preferred mimeType is not supported.';
     }
     this.mediaRecorder_ = new MediaRecorder(
         this.preview_.stream, {mimeType: cca.views.Camera.RECORD_MIMETYPE});
@@ -468,8 +473,6 @@ cca.views.Camera.prototype.constraintsCandidates_ = function() {
  * @private
  */
 cca.views.Camera.prototype.stop_ = function() {
-  // Update shutter label as record-mode might be toggled before reaching here.
-  this.updateShutterLabel_();
   // Wait for ongoing 'start' and 'take' done before restarting camera.
   return Promise.all([
     this.started_,
@@ -480,6 +483,7 @@ cca.views.Camera.prototype.stop_ = function() {
     this.imageCapture_ = null;
     this.photoCapabilities_ = null;
     document.body.classList.remove('capturing');
+    this.updateControls_();
     this.start_();
     return this.started_;
   });
@@ -491,17 +495,18 @@ cca.views.Camera.prototype.stop_ = function() {
  */
 cca.views.Camera.prototype.start_ = function() {
   var suspend = this.locked_ || chrome.app.window.current().isMinimized();
-  this.started_ = (suspend ? Promise.reject(new Error('suspend')) :
+  this.started_ = (suspend ? Promise.reject('suspend') :
       this.constraintsCandidates_()).then((candidates) => {
     var tryStartWithCandidate = (index) => {
       if (index >= candidates.length) {
-        return Promise.reject(new Error('out-of-candidates'));
+        return Promise.reject('out-of-candidates');
       }
       var constraints = candidates[index];
       return navigator.mediaDevices.getUserMedia(constraints).then(
           this.preview_.start.bind(this.preview_)).then(() => {
         this.options_.updateValues(constraints, this.preview_.stream);
         document.body.classList.add('capturing');
+        this.updateControls_();
         cca.nav.close('warning', 'no-camera');
       }).catch((error) => {
         console.error(error);
@@ -513,7 +518,7 @@ cca.views.Camera.prototype.start_ = function() {
     };
     return tryStartWithCandidate(0);
   }).catch((error) => {
-    if (error && error.message != 'suspend') {
+    if (error != 'suspend') {
       console.error(error);
       cca.nav.open('warning', 'no-camera');
     }

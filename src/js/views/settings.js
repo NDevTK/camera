@@ -17,7 +17,7 @@ cca.views = cca.views || {};
 /**
  * Creates the base controller of settings view.
  * @param {string} selector Selector text of the view's root element.
- * @param {Object<string|function(Event=)>} itemHandlers Click-handlers
+ * @param {Object.<string|function(Event=)>} itemHandlers Click-handlers
  *     mapped by element ids.
  * @extends {cca.views.View}
  * @constructor
@@ -133,6 +133,5 @@ cca.views.MasterSettings.prototype.openFeedback = function() {
  * @private
  */
 cca.views.MasterSettings.prototype.openHelp_ = function() {
-  window.open(
-      'https://support.google.com/chromebook/?p=camera_usage_on_chromebook');
+  window.open('https://support.google.com/chromebook/answer/4487486');
 };

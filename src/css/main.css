@@ -75,6 +75,12 @@ input {
   -webkit-appearance: none;
 }
 
+button[disabled],
+input[disabled] {
+  opacity: 0.75;
+  pointer-events: none;
+}
+
 button:focus:after,
 input:focus:after {
   position: absolute;
@@ -674,8 +680,7 @@ body:not(.grid):not(.gridsettings) #preview-grid-vertical:before {
   margin: 0 8px;
 }
 
-#browser .buttons button[disabled],
-body.ext-fs #browser-export {
+#browser .buttons button[disabled] {
   display: none;
 }
 
@@ -977,7 +982,7 @@ body.dialog #dialog #dialog-popup {
 }
 
 #dialog #dialog-msg {
-  user-select: text;  /* Allow copying the message. */
+  -webkit-user-select: text;  /* Allow copying the message. */
   cursor: text;
   color: #202124;
   font-size: 14px;
@@ -1023,7 +1028,6 @@ body.dialog #dialog #dialog-popup {
 
 #dialog-buttons button:focus {
   background-color: #2581df;
-  border-color: #2581df;
   color: white;
 }
 

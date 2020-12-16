@@ -92,26 +92,41 @@ cca.views.camera.Preview.prototype.toString = function() {
  * @return {!Promise} Promise for the operation.
  */
 cca.views.camera.Preview.prototype.setSource_ = function(stream) {
-  var video = document.createElement('video');
-  video.id = 'preview-video';
-  video.muted = true; // Mute to avoid echo from the captured audio.
   return new Promise((resolve) => {
-    var handler = () => {
-      video.removeEventListener('canplay', handler);
+    var video = document.createElement('video');
+    video.id = 'preview-video';
+    video.setAttribute('aria-hidden', 'true');
+
+    var onLoadedMetadata = () => {
+      var onIntrinsicSize = () => {
+        // Handles the intrinsic size first fetched or its orientation changes.
+        if (this.video_.videoWidth && this.video_.videoHeight) {
+          this.onAspectRatio_(this.video_.videoWidth / this.video_.videoHeight);
+        }
+        this.cancelFocus_();
+      };
+      var onClick = (event) => {
+        this.applyFocus_(event.offsetX, event.offsetY);
+      };
+      video.removeEventListener('loadedmetadata', onLoadedMetadata);
+      video.addEventListener('resize', onIntrinsicSize);
+      video.addEventListener('click', onClick);
+      video.cleanup = () => {
+        video.removeEventListener('resize', onIntrinsicSize);
+        video.removeEventListener('click', onClick);
+        video.removeAttribute('srcObject');
+        video.load();
+      };
+      video.play();
+      this.video_.parentElement.replaceChild(video, this.video_);
+      this.video_.cleanup();
+      this.video_ = video;
+      onIntrinsicSize();
       resolve();
     };
-    video.addEventListener('canplay', handler);
+    video.addEventListener('loadedmetadata', onLoadedMetadata);
+    video.muted = true; // Mute to avoid echo from the captured audio.
     video.srcObject = stream;
-  }).then(() => video.play()).then(() => {
-    video.cleanup = () => {
-      video.removeAttribute('srcObject');
-      video.load();
-    };
-    this.video_.parentElement.replaceChild(video, this.video_).cleanup();
-    this.video_ = video;
-    this.onIntrinsicSizeChanged_();
-    video.addEventListener('resize', () => this.onIntrinsicSizeChanged_());
-    video.addEventListener('click', (event) => this.onFocusClicked_(event));
   });
 };
 
@@ -169,39 +184,29 @@ cca.views.camera.Preview.prototype.toImage = function() {
       if (blob) {
         resolve(blob);
       } else {
-        reject(new Error('Photo blob error.'));
+        reject('Photo blob error.');
       }
     }, 'image/jpeg');
   });
 };
 
 /**
- * Handles changed intrinsic size (first loaded or orientation changes).
+ * Applies focus at the given coordinate.
+ * @param {number} offsetX X-coordinate based on the video element.
+ * @param {number} offsetY Y-coordinate based on the video element.
  * @private
  */
-cca.views.camera.Preview.prototype.onIntrinsicSizeChanged_ = function() {
-  if (this.video_.videoWidth && this.video_.videoHeight) {
-    this.onAspectRatio_(this.video_.videoWidth / this.video_.videoHeight);
-  }
-  this.cancelFocus_();
-};
-
-/**
- * Handles clicking for focus.
- * @param {Event} event Click event.
- * @private
- */
-cca.views.camera.Preview.prototype.onFocusClicked_ = function(event) {
+cca.views.camera.Preview.prototype.applyFocus_ = function(offsetX, offsetY) {
   this.cancelFocus_();
 
   // Normalize to square space coordinates by W3C spec.
-  var x = event.offsetX / this.video_.width;
-  var y = event.offsetY / this.video_.height;
+  var x = offsetX / this.video_.width;
+  var y = offsetY / this.video_.height;
   var constraints = {advanced: [{pointsOfInterest: [{x, y}]}]};
   var track = this.video_.srcObject.getVideoTracks()[0];
   var focus = track.applyConstraints(constraints).then(() => {
     if (focus != this.focus_) {
-      return; // Focus was cancelled.
+      throw 'Focus was cancelled.';
     }
     var aim = document.querySelector('#preview-focus-aim');
     var clone = aim.cloneNode(true);
@@ -209,7 +214,7 @@ cca.views.camera.Preview.prototype.onFocusClicked_ = function(event) {
     clone.style.top = `${y * 100}%`;
     clone.hidden = false;
     aim.parentElement.replaceChild(clone, aim);
-  }).catch(console.error);
+  }).catch((error) => console.error(error));
   this.focus_ = focus;
 };
 

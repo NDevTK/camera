@@ -44,6 +44,18 @@ cca.views.camera.Options = function(onNewStreamNeeded) {
   this.toggleMirror_ = document.querySelector('#toggle-mirror');
 
   /**
+   * @type {HTMLInputElement}
+   * @private
+   */
+  this.toggleGrid_ = document.querySelector('#toggle-grid');
+
+  /**
+   * @type {HTMLInputElement}
+   * @private
+   */
+  this.toggleTimer_ = document.querySelector('#toggle-timer');
+
+  /**
    * @type {Audio}
    * @private
    */
@@ -95,13 +107,6 @@ cca.views.camera.Options = function(onNewStreamNeeded) {
    */
   this.mirroringToggles_ = {};
 
-  /**
-   * Current audio track in use.
-   * @type {MediaStreamTrack}
-   * @private
-   */
-  this.audioTrack_ = null;
-
   // End of properties, seal the object.
   Object.seal(this);
 
@@ -109,13 +114,15 @@ cca.views.camera.Options = function(onNewStreamNeeded) {
     ['#switch-device', () => this.switchDevice_()],
     ['#switch-recordvideo', () => this.switchMode_(true)],
     ['#switch-takephoto', () => this.switchMode_(false)],
-    ['#toggle-grid', () => this.animatePreviewGrid_()],
-    ['#open-settings', () => cca.nav.open('settings')],
   ].forEach(([selector, fn]) =>
       document.querySelector(selector).addEventListener('click', fn));
 
-  this.toggleMic_.addEventListener('click', () => this.updateAudioByMic_());
   this.toggleMirror_.addEventListener('click', () => this.saveMirroring_());
+  this.toggleGrid_.addEventListener('click', () => this.animatePreviewGrid_());
+  this.toggleMic_.addEventListener('click', () => this.updateMicAudio());
+
+  document.querySelector('#open-settings').addEventListener(
+      'click', () => cca.nav.open('settings'));
 
   // Load the shutter, tick, and recording sound.
   this.shutterSound_.src = '../sounds/shutter.ogg';
@@ -134,13 +141,6 @@ cca.views.camera.Options.Sound = Object.freeze({
   RECORDSTART: 2,
   RECORDEND: 3,
 });
-
-cca.views.camera.Options.prototype = {
-  get newStreamRequestDisabled() {
-    return !document.body.classList.contains('capturing') ||
-        document.body.classList.contains('taking');
-  },
-};
 
 /**
  * Prepares the options.
@@ -163,9 +163,6 @@ cca.views.camera.Options.prototype.prepare = function() {
  * @private
  */
 cca.views.camera.Options.prototype.switchMode_ = function(record) {
-  if (this.newStreamRequestDisabled) {
-    return;
-  }
   document.body.classList.toggle('record-mode', record);
   document.body.classList.add('mode-switching');
   this.onNewStreamNeeded_().then(
@@ -177,9 +174,6 @@ cca.views.camera.Options.prototype.switchMode_ = function(record) {
  * @private
  */
 cca.views.camera.Options.prototype.switchDevice_ = function() {
-  if (this.newStreamRequestDisabled) {
-    return;
-  }
   this.videoDevices_.then((devices) => {
     cca.util.animateOnce(document.querySelector('#switch-device'));
     var index = devices.findIndex(
@@ -215,7 +209,6 @@ cca.views.camera.Options.prototype.animatePreviewGrid_ = function() {
  * Handles playing the sound by the speaker option.
  * @param {cca.views.camera.Options.Sound} sound Sound to be played.
  * @return {boolean} Whether the sound being played.
- * TODO(yuli): Move this function into sounds.js.
  */
 cca.views.camera.Options.prototype.playSound = function(sound) {
   // TODO(yuli): Don't play sounds if the speaker settings is muted.
@@ -237,12 +230,22 @@ cca.views.camera.Options.prototype.playSound = function(sound) {
 };
 
 /**
+ * Handles enabling microphone audio by the microphone option.
+ * @param {boolean} forceEnable Whether force to enable microphone.
+ */
+cca.views.camera.Options.prototype.updateMicAudio = function(forceEnable) {
+  var enabled = forceEnable || this.toggleMic_.checked;
+  if (this.toggleMic_.track) {
+    this.toggleMic_.track.enabled = enabled;
+  }
+};
+
+/**
  * Schedules ticks by the timer option if any.
  * @return {?Promise} Promise for the operation.
- * TODO(yuli): Move this function into timerticks.js.
  */
 cca.views.camera.Options.prototype.timerTicks = function() {
-  if (!document.body.classList.contains('timer')) {
+  if (!this.toggleTimer_.checked) {
     return null;
   }
   var cancel;
@@ -278,6 +281,19 @@ cca.views.camera.Options.prototype.timerTicks = function() {
 };
 
 /**
+ * Updates UI controls' disabled status for capturing/taking state changes.
+ * @param {boolean} capturing Whether camera is capturing.
+ * @param {boolean} taking Whether camera is taking.
+ */
+cca.views.camera.Options.prototype.updateControls = function(
+    capturing, taking) {
+  var disabled = !capturing || taking;
+  var selector = '#switch-device, #switch-recordvideo, #switch-takephoto';
+  document.querySelectorAll(selector).forEach(
+      (element) => element.disabled = disabled);
+};
+
+/**
  * Updates the options' values for the current constraints and stream.
  * @param {Object} constraints Current stream constraints in use.
  * @param {MediaStream} stream Current Stream in use.
@@ -288,8 +304,8 @@ cca.views.camera.Options.prototype.updateValues = function(
   var trackSettings = track.getSettings && track.getSettings();
   this.updateVideoDeviceId_(constraints, trackSettings);
   this.updateMirroring_(trackSettings);
-  this.audioTrack_ = stream.getAudioTracks()[0];
-  this.updateAudioByMic_();
+  this.toggleMic_.track = stream.getAudioTracks()[0];
+  this.updateMicAudio();
 };
 
 /**
@@ -343,16 +359,6 @@ cca.views.camera.Options.prototype.saveMirroring_ = function() {
 };
 
 /**
- * Enables/disables the current audio track by the microphone option.
- * @private
- */
-cca.views.camera.Options.prototype.updateAudioByMic_ = function() {
-  if (this.audioTrack_) {
-    this.audioTrack_.enabled = this.toggleMic_.checked;
-  }
-};
-
-/**
  * Updates list of available video devices when changed, including the UI.
  * Does nothing if refreshing is already in progress.
  * @private
@@ -366,6 +372,7 @@ cca.views.camera.Options.prototype.maybeRefreshVideoDeviceIds_ = function() {
   this.videoDevices_ = navigator.mediaDevices.enumerateDevices().then(
       (devices) => devices.filter((device) => device.kind == 'videoinput'));
 
+  // Show switch-device button only when more than one camera.
   var multi = false;
   this.videoDevices_.then((devices) => {
     multi = devices.length >= 2;
@@ -382,7 +389,7 @@ cca.views.camera.Options.prototype.maybeRefreshVideoDeviceIds_ = function() {
 cca.views.camera.Options.prototype.videoDeviceIds = function() {
   return this.videoDevices_.then((devices) => {
     if (devices.length == 0) {
-      throw new Error('Device list empty.');
+      throw 'Device list empty.';
     }
     // Put the selected video device id first.
     var sorted = devices.map((device) => device.deviceId).sort((a, b) => {
