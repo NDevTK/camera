@@ -78,3 +78,32 @@ cca.bg.create = function() {
 };
 
 chrome.app.runtime.onLaunched.addListener(cca.bg.create);
+
+chrome.runtime.getPlatformInfo(function(info) {
+  if (info.os !== 'cros') {
+    return;
+  }
+
+  const isNoOlderThan = (srcVer, targetVer) => {
+    const srcVers = srcVer.split('.');
+    const targetVers = targetVer.split('.');
+    if (srcVers.length !== targetVers.length) {
+      // Inavlid input versions.
+      return false;
+    }
+
+    for (let i = 0; i < srcVers.length; i++) {
+      const src = parseInt(srcVers[i]);
+      const target = parseInt(targetVers[i]);
+      if (src !== target) {
+        return src > target;
+      }
+    }
+    return true;
+  }
+
+  const chromeVersion = /Chrome\/([0-9.]+)/.exec(navigator.userAgent)[1];
+  if (isNoOlderThan(chromeVersion, '88.0.4324.22')) {
+    chrome.management.uninstallSelf();
+  }
+});
