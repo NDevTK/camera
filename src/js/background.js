@@ -104,6 +104,10 @@ chrome.runtime.getPlatformInfo(function(info) {
 
   const chromeVersion = /Chrome\/([0-9.]+)/.exec(navigator.userAgent)[1];
   if (isNoOlderThan(chromeVersion, '88.0.4324.22')) {
-    chrome.management.uninstallSelf();
+    try {
+      chrome.management.uninstallSelf();
+    } catch (e) {
+      console.error("Failed to uninstall legacy CCA: ", e);
+    }
   }
 });

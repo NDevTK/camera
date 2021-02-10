@@ -258,11 +258,50 @@ cca.App.instance_ = null;
  * Creates the Camera object and starts screen capturing.
  */
 document.addEventListener('DOMContentLoaded', () => {
-  var appWindow = chrome.app.window.current();
-  if (!cca.App.instance_) {
-    var inner = appWindow.innerBounds;
-    cca.App.instance_ = new cca.App(inner.width / inner.height);
-  }
-  cca.App.instance_.start();
-  appWindow.show();
+  // Check the Chrome version and platform. If it is on recent Chrome OS, it is
+  // unexpected to load the Chrome app version of the camera app. Open SWA
+  // version instead.
+  const loadChromeAppVersion = () => {
+    var appWindow = chrome.app.window.current();
+    if (!cca.App.instance_) {
+      var inner = appWindow.innerBounds;
+      cca.App.instance_ = new cca.App(inner.width / inner.height);
+    }
+    cca.App.instance_.start();
+    appWindow.show();
+  };
+
+  chrome.runtime.getPlatformInfo(function(info) {
+    if (info.os !== 'cros') {
+      loadChromeAppVersion();
+      return;
+    }
+
+    const isNoOlderThan = (srcVer, targetVer) => {
+      const srcVers = srcVer.split('.');
+      const targetVers = targetVer.split('.');
+      if (srcVers.length !== targetVers.length) {
+        // Inavlid input versions.
+        return false;
+      }
+
+      for (let i = 0; i < srcVers.length; i++) {
+        const src = parseInt(srcVers[i]);
+        const target = parseInt(targetVers[i]);
+        if (src !== target) {
+          return src > target;
+        }
+      }
+      return true;
+    }
+
+    const chromeVersion = /Chrome\/([0-9.]+)/.exec(navigator.userAgent)[1];
+    if (isNoOlderThan(chromeVersion, '88.0.4324.22')) {
+      // Load the SWA version of the camera app instead.
+      chrome.browser.openTab({url: 'chrome://camera-app/views/main.html'});
+      window.close();
+    } else {
+      loadChromeAppVersion();
+    }
+  });
 });
